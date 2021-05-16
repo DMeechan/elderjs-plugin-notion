@@ -1,55 +1,88 @@
+const { Client } = require('@notionhq/client');
+
+const { getPostsFromDatabase } = require('./notion');
+
+const route = 'notionBlog';
+
 const plugin = {
-  name: 'elderjs-plugin-your-plugin',
-  description: `[copy and paste the start of your readme]`,
-  init: (plugin) => {
-    // this is a sync function that runs on plugin initialization.
-    // if you need async, it is recommended that you extract the async logic to run on the 'bootstrap' hook.
+  name: 'elderjs-plugin-notion',
+  description: `Reads and collects posts from specified Notion database, then adds the posts as "requests" on "allRequests.`,
+  // TODO: is it problematic that init is async? even though the official markdown plugin uses async init() too?
+  init: async (plugin) => {
+    const {
+      notion: { apiKey, databaseId },
+    } = plugin.config;
 
-    // Plugins have their own closure scope. This means that if you set:
-    // plugin.init = true
-    // you will have access to plugin.init in all of your hooks.
-    // this data can be updated in hooks and will be persistent between page loads.
-    
-    // IMPORTANT: It is important to note that since builds are run across child processes, 
-    // the 'plugin' object is not consistent across all processes.
+    plugin.posts = {};
+    plugin.requests = [];
 
-    // Plugins also get the build settings (plugin.settings) and the config (plugin.config) settings. 
- 
+    const notion = new Client({
+      auth: apiKey,
+    });
+
+    // 1 Fetch databse pages from Notion
+    plugin.posts = await getPostsFromDatabase(notion, databaseId);
+
+    // 2 put them somewhere?
+    for (const [postId, post] of Object.entries(plugin.posts)) {
+      plugin.requests.push({ route, slug: postId, id: postId, title: post.title });
+    }
+
     return plugin;
   },
   hooks: [
     {
       hook: 'bootstrap',
-      name: 'yourFirstHook',
-      description: `A description of what this hook does.`,
+      name: 'addNotionPagesToDataObject',
+      description: `Add parsed Notion content to the data object`,
       priority: 50,
-      run: async ({ plugin, routes }) => {
-
-        // all props and mutations are detailed here: https://github.com/Elderjs/elderjs/blob/master/src/hooks/hookInterface.ts
-        // if you are looking for details on what a prop or mutation represents you can read this: https://github.com/Elderjs/elderjs/blob/master/src/hooks/hookEntityDefinitions.ts
-
-        // here is how you'd read the init property set in the init() function
-        plugin.bootstrapRan = true;
-        return {
-          plugin,
-        };
-      }
+      run: async ({ plugin, data }) => {
+        if (plugin.config.routes.length > 0) {
+          return {
+            data: { ...data, posts: plugin.posts },
+          };
+        }
+      },
     },
     {
-      hook: 'request',
-      name: 'yourSecondHook',
-      description: `A description of what this hook does.`,
+      hook: 'allRequests',
+      name: 'addNotionPagesToAllRequests',
+      description: `Add collected Notion posts to allRequests array`,
       priority: 50,
-      run: async ({ plugin, routes }) => {
-        // plugin.bootstrapRan will alaways be true in this example because `bootstrap` runs before `request`. 
-        return {
-          plugin,
-        };
-      }
+      run: async ({ allRequests, plugin }) => {
+        if (plugin.config.routes.length > 0) {
+          return {
+            allRequests: [...allRequests, ...plugin.requests],
+          };
+        }
+      },
+    },
+    {
+      hook: 'data',
+      name: 'addFrontmatterAndHtmlToDataForRequest',
+      description: 'Adds parsed frontmatter and html to the data object for the specific request.',
+      priority: 50,
+      run: async ({ request, data }) => {
+        if (request.route === route && data.posts && data.posts[request.slug]) {
+          const post = data.posts[request.slug];
+          return {
+            data: {
+              ...data,
+              post,
+              html: `<p>${JSON.stringify(post)}</p>`,
+            },
+          };
+        }
+      },
     },
   ],
-  config: { // here is where you set the default configs for your plugin. These are merged with the configs found in the user's elder.config.js file.
-    doMagic: true,
+  config: {
+    // default configs, merged with user's elder.config.js file
+    routes: [route],
+    notion: {
+      apiKey: process.env.NOTION_API_KEY || '',
+      databaseId: process.env.NOTION_DATABASE_ID || '',
+    },
   },
 };
 
