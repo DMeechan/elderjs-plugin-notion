@@ -1,24 +1,40 @@
-# Elder.js Plugin Template
+# Elder.js Plugin: Notion
 
-If you are looking to write an [Elder.js](https://elderguide.com/tech/elderjs/) plugin we've setup this template to help streamline that process.
+Easily use Notion as a CMS for your Elder.js site.
 
-Recommended naming is `elderjs-plugin-` + `your-plugin`.
+> 🚨 This plugin is a very early work in progress! The instructions below won't work just yet!
 
-Below you'll find recommended minimal documenation. 
+### What does the plugin do?
 
-Once you've got your plugin written, please drop us a PR to add it to [Elderjs/plugins](https://github.com/Elderjs/plugins) repo. 
+This plugin fetches pages from a database in Notion, parses the contents, then makes it available for your Svelte templates.
 
---------
+For example, you can write all of your blog posts in Notion then have Elder.js statically generate all the pages for you.
+
+It's similar to [Elder.js's official markdown plugin](https://github.com/Elderjs/plugins/tree/master/packages/markdown), but using Notion instead of markdown files.
+
+### Install
+
+```bash
+npm install --save dmeechan/elderjs-plugin-notion
+```
+
+### Set up a database in Notion
 
 
-# Elder.js Plugin: Your Plugin
 
-> Here is where you'd write an intro to your plugin.
+### Config
 
+Once installed, open your `elder.config.js` and configure the plugin by adding `dmeechan/elderjs-plugin-notion` to your plugin object:
 
-## Install
+```javascript
+plugins: {
+  'dmeechan/elderjs-plugin-notion': {
+    ... todo ...
+  },
 
-> Here is where you'd want to include how to install your plugin.
+}
+```
+
 
 ```bash
 npm i -s elderjs-plugin-your-plugin
