@@ -1,73 +1,76 @@
 import { Client } from "@notionhq/client";
 import {
-  PropertyValue,
-  SelectPropertyValue,
-  TitlePropertyValue,
-} from "@notionhq/client/build/src/api-types";
+  BlocksChildrenListResponse,
+  DatabasesQueryParameters,
+  DatabasesQueryResponse,
+} from "@notionhq/client/build/src/api-endpoints";
+import { Block, Page } from "@notionhq/client/build/src/api-types";
 
-export interface Post {
-  id: string;
-  title: string;
-  status: string;
-}
+type PageWithChildren = Page & { children: Block[] };
+export type PagesById = { [key: string]: PageWithChildren };
 
-export type Posts = { [key: string]: Post };
-
-// Get a paginated list of Posts currently in a database.
-export async function getPostsFromDatabase({
+/**
+ * @returns all pages from a Notion database
+ */
+export async function getDatabasePages({
   apiKey,
   databaseId,
+  databaseQueryParameters,
 }: {
   apiKey: string;
   databaseId: string;
-}): Promise<Posts> {
+  databaseQueryParameters?: DatabasesQueryParameters;
+}): Promise<PagesById> {
   const notion = new Client({
     auth: apiKey,
   });
 
-  const posts: Posts = {};
+  const allPagesById: PagesById = {};
+  let pages: DatabasesQueryResponse;
+  let cursor = databaseQueryParameters?.start_cursor || undefined;
 
-  async function getPageOfTasks(cursor?: string) {
-    const currentPages = await notion.databases.query({
+  do {
+    pages = await notion.databases.query({
       database_id: databaseId,
-      start_cursor: cursor || undefined,
+      ...databaseQueryParameters,
+      start_cursor: cursor,
     });
 
-    for (const page of currentPages.results) {
-      const { properties } = page;
-      const { Name, Status } = properties;
+    // Fetch the page's content
+    await Promise.allSettled(
+      pages.results.map(async (page) => {
+        const pageWithChildren = page as PageWithChildren;
+        pageWithChildren.children = await getPageContent({
+          notion,
+          pageId: page.id,
+        });
 
-      const post = {
-        id: page.id,
-        title: "No title",
-        status: "No Status",
-      };
+        allPagesById[page.id] = pageWithChildren;
+      })
+    );
 
-      if (isTitle(Name) && Name.title?.length > 0) {
-        post.title = Name.title.map((richText) => richText.plain_text).join("");
-      }
+    cursor = pages.next_cursor || undefined;
+  } while (pages.has_more && cursor);
 
-      if (isSelect(Status)) {
-        post.status = Status.select.name;
-      }
-
-      posts[page.id] = post;
-    }
-
-    if (currentPages.has_more && currentPages.next_cursor) {
-      await getPageOfTasks(currentPages.next_cursor);
-    }
-  }
-
-  await getPageOfTasks();
-
-  return posts;
+  return allPagesById;
 }
 
-function isTitle(property: PropertyValue): property is TitlePropertyValue {
-  return property.type === "title";
-}
+async function getPageContent({
+  notion,
+  pageId,
+}: {
+  notion: Client;
+  pageId: string;
+}): Promise<Block[]> {
+  const content: Block[] = [];
+  let cursor: string | undefined = undefined;
+  let children: BlocksChildrenListResponse;
 
-function isSelect(property: PropertyValue): property is SelectPropertyValue {
-  return property.type === "select";
+  do {
+    children = await notion.blocks.children.list({ block_id: pageId });
+    content.push(...children.results);
+    cursor = children.next_cursor || undefined;
+  } while (children.has_more && cursor);
+
+  return content;
 }

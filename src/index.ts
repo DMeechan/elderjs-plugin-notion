@@ -1,33 +1,54 @@
 import { RequestOptions } from "@elderjs/elderjs";
+import { DatabasesQueryParameters } from "@notionhq/client/build/src/api-endpoints";
 
-import { getPostsFromDatabase, Posts } from "./notion";
+import { getDatabasePages, PagesById } from "./notion";
 
-const route = "notionBlog";
+// TODO: get rid of this
+const mainRoute = "notionBlog";
 
-type Plugin = { config: any; posts: Posts; requests: any[] };
+type Config = {
+  notion: {
+    apiKey: string;
+    databaseId: string;
+    databaseQueryParameters?: DatabasesQueryParameters;
+  };
+  routes: any[];
+};
+type Plugin = { config: Config; pages: PagesById; requests: any[] };
 
 const plugin = {
   name: "elderjs-plugin-notion",
-  description: `Reads and collects posts from specified Notion database, then adds the posts as "requests" on "allRequests.`,
+  description: `Fetches all pages from a Notion database, then adds the pages as "requests" on "allRequests.`,
   // TODO: is it problematic that init is async? even though the official markdown plugin uses async init() too?
   init: async (plugin: Plugin) => {
     const {
-      notion: { apiKey, databaseId },
+      notion: { apiKey, databaseId, databaseQueryParameters },
     } = plugin.config;
 
-    plugin.posts = {};
+    if (!apiKey) {
+      throw new Error(
+        "Missing notion.apiKey: please enter a Notion API key in your plugin config. Follow these steps to create a Notion API key: https://developers.notion.com/docs/getting-started"
+      );
+    }
+
+    if (!databaseId) {
+      throw new Error(
+        "Missing notion.databaseId: please enter a Notion database ID. Learn more about Notion databases here: https://developers.notion.com/docs/working-with-databases"
+      );
+    }
+
+    plugin.pages = await getDatabasePages({
+      apiKey,
+      databaseId,
+      databaseQueryParameters,
+    });
+
     plugin.requests = [];
-
-    // 1 Fetch databse pages from Notion
-    plugin.posts = await getPostsFromDatabase({ apiKey, databaseId });
-
-    // 2 Save them for later
-    for (const [postId, post] of Object.entries(plugin.posts)) {
+    for (const [id, page] of Object.entries(plugin.pages)) {
       plugin.requests.push({
-        route,
-        slug: postId,
-        id: postId,
-        title: post.title,
+        route: mainRoute,
+        slug: id,
+        page,
       });
     }
 
@@ -37,12 +58,12 @@ const plugin = {
     {
       hook: "bootstrap",
       name: "addNotionPagesToDataObject",
-      description: `Add parsed Notion content to the data object`,
+      description: `Add Notion pages to the data object`,
       priority: 50,
       run: async ({ plugin, data }: { plugin: Plugin; data: any }) => {
         if (plugin.config.routes.length > 0) {
           return {
-            data: { ...data, posts: plugin.posts },
+            data: { ...data, pages: plugin.pages },
           };
         }
 
@@ -52,7 +73,7 @@ const plugin = {
     {
       hook: "allRequests",
       name: "addNotionPagesToAllRequests",
-      description: `Add collected Notion posts to allRequests array`,
+      description: `Add collected Notion pages to allRequests array`,
       priority: 50,
       run: async ({
         allRequests,
@@ -84,17 +105,17 @@ const plugin = {
         data: any;
       }) => {
         if (
-          request.route === route &&
+          request.route === mainRoute &&
           request.slug &&
-          data.posts &&
-          data.posts[request.slug]
+          data.pages &&
+          data.pages[request.slug]
         ) {
-          const post = data.posts[request.slug];
+          const page = data.pages[request.slug];
           return {
             data: {
               ...data,
-              post,
-              html: `<p>${JSON.stringify(post)}</p>`,
+              page,
+              html: `<p>${JSON.stringify(page)}</p>`,
             },
           };
         }
@@ -105,11 +126,11 @@ const plugin = {
   ],
   config: {
     // default configs, merged with user's elder.config.js file
-    routes: [route],
+    routes: [],
     notion: {
-      apiKey: process.env.NOTION_API_KEY || "",
-
-      databaseId: process.env.NOTION_DATABASE_ID || "",
+      apiKey: "",
+      databaseId: "",
+      databaseQueryParameters: {},
     },
   },
 };

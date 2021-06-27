@@ -8,7 +8,7 @@ var __getOwnPropSymbols = Object.getOwnPropertySymbols;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
 var __propIsEnum = Object.prototype.propertyIsEnumerable;
-var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, {enumerable: true, configurable: true, writable: true, value}) : obj[key] = value;
+var __defNormalProp = (obj, key, value) => key in obj ? __defProp(obj, key, { enumerable: true, configurable: true, writable: true, value }) : obj[key] = value;
 var __spreadValues = (a, b) => {
   for (var prop in b || (b = {}))
     if (__hasOwnProp.call(b, prop))
@@ -21,93 +21,101 @@ var __spreadValues = (a, b) => {
   return a;
 };
 var __spreadProps = (a, b) => __defProps(a, __getOwnPropDescs(b));
-var __markAsModule = (target) => __defProp(target, "__esModule", {value: true});
+var __markAsModule = (target) => __defProp(target, "__esModule", { value: true });
 var __export = (target, all) => {
+  __markAsModule(target);
   for (var name in all)
-    __defProp(target, name, {get: all[name], enumerable: true});
+    __defProp(target, name, { get: all[name], enumerable: true });
 };
 var __reExport = (target, module2, desc) => {
   if (module2 && typeof module2 === "object" || typeof module2 === "function") {
     for (let key of __getOwnPropNames(module2))
       if (!__hasOwnProp.call(target, key) && key !== "default")
-        __defProp(target, key, {get: () => module2[key], enumerable: !(desc = __getOwnPropDesc(module2, key)) || desc.enumerable});
+        __defProp(target, key, { get: () => module2[key], enumerable: !(desc = __getOwnPropDesc(module2, key)) || desc.enumerable });
   }
   return target;
 };
 var __toModule = (module2) => {
-  return __reExport(__markAsModule(__defProp(module2 != null ? __create(__getProtoOf(module2)) : {}, "default", module2 && module2.__esModule && "default" in module2 ? {get: () => module2.default, enumerable: true} : {value: module2, enumerable: true})), module2);
+  return __reExport(__markAsModule(__defProp(module2 != null ? __create(__getProtoOf(module2)) : {}, "default", module2 && module2.__esModule && "default" in module2 ? { get: () => module2.default, enumerable: true } : { value: module2, enumerable: true })), module2);
 };
 
 // src/index.ts
-__markAsModule(exports);
 __export(exports, {
   default: () => src_default
 });
 
 // src/notion.ts
 var import_client = __toModule(require("@notionhq/client"));
-async function getPostsFromDatabase({
+async function getDatabasePages({
   apiKey,
-  databaseId
+  databaseId,
+  databaseQueryParameters
 }) {
   const notion = new import_client.Client({
     auth: apiKey
   });
-  const posts = {};
-  async function getPageOfTasks(cursor) {
-    var _a;
-    const currentPages = await notion.databases.query({
-      database_id: databaseId,
-      start_cursor: cursor || void 0
-    });
-    for (const page of currentPages.results) {
-      const {properties} = page;
-      const {Name, Status} = properties;
-      const post = {
-        id: page.id,
-        title: "No title",
-        status: "No Status"
-      };
-      if (isTitle(Name) && ((_a = Name.title) == null ? void 0 : _a.length) > 0) {
-        post.title = Name.title.map((richText) => richText.plain_text).join("");
-      }
-      if (isSelect(Status)) {
-        post.status = Status.select.name;
-      }
-      posts[page.id] = post;
-    }
-    if (currentPages.has_more && currentPages.next_cursor) {
-      await getPageOfTasks(currentPages.next_cursor);
-    }
-  }
-  await getPageOfTasks();
-  return posts;
+  const allPagesById = {};
+  let pages;
+  let cursor = (databaseQueryParameters == null ? void 0 : databaseQueryParameters.start_cursor) || void 0;
+  do {
+    pages = await notion.databases.query(__spreadProps(__spreadValues({
+      database_id: databaseId
+    }, databaseQueryParameters), {
+      start_cursor: cursor
+    }));
+    await Promise.allSettled(pages.results.map(async (page) => {
+      const pageWithChildren = page;
+      pageWithChildren.children = await getPageContent({
+        notion,
+        pageId: page.id
+      });
+      allPagesById[page.id] = pageWithChildren;
+    }));
+    cursor = pages.next_cursor || void 0;
+  } while (pages.has_more && cursor);
+  return allPagesById;
 }
-function isTitle(property) {
-  return property.type === "title";
-}
-function isSelect(property) {
-  return property.type === "select";
+async function getPageContent({
+  notion,
+  pageId
+}) {
+  const content = [];
+  let cursor = void 0;
+  let children;
+  do {
+    children = await notion.blocks.children.list({ block_id: pageId });
+    content.push(...children.results);
+    cursor = children.next_cursor || void 0;
+  } while (children.has_more && cursor);
+  return content;
 }
 
 // src/index.ts
-var route = "notionBlog";
+var mainRoute = "notionBlog";
 var plugin = {
   name: "elderjs-plugin-notion",
-  description: `Reads and collects posts from specified Notion database, then adds the posts as "requests" on "allRequests.`,
+  description: `Fetches all pages from a Notion database, then adds the pages as "requests" on "allRequests.`,
   init: async (plugin2) => {
     const {
-      notion: {apiKey, databaseId}
+      notion: { apiKey, databaseId, databaseQueryParameters }
     } = plugin2.config;
-    plugin2.posts = {};
+    if (!apiKey) {
+      throw new Error("Missing notion.apiKey: please enter a Notion API key in your plugin config. Follow these steps to create a Notion API key: https://developers.notion.com/docs/getting-started");
+    }
+    if (!databaseId) {
+      throw new Error("Missing notion.databaseId: please enter a Notion database ID. Learn more about Notion databases here: https://developers.notion.com/docs/working-with-databases");
+    }
+    plugin2.pages = await getDatabasePages({
+      apiKey,
+      databaseId,
+      databaseQueryParameters
+    });
     plugin2.requests = [];
-    plugin2.posts = await getPostsFromDatabase({apiKey, databaseId});
-    for (const [postId, post] of Object.entries(plugin2.posts)) {
+    for (const [id, page] of Object.entries(plugin2.pages)) {
       plugin2.requests.push({
-        route,
-        slug: postId,
-        id: postId,
-        title: post.title
+        route: mainRoute,
+        slug: id,
+        page
       });
     }
     return plugin2;
@@ -116,12 +124,12 @@ var plugin = {
     {
       hook: "bootstrap",
       name: "addNotionPagesToDataObject",
-      description: `Add parsed Notion content to the data object`,
+      description: `Add Notion pages to the data object`,
       priority: 50,
-      run: async ({plugin: plugin2, data}) => {
+      run: async ({ plugin: plugin2, data }) => {
         if (plugin2.config.routes.length > 0) {
           return {
-            data: __spreadProps(__spreadValues({}, data), {posts: plugin2.posts})
+            data: __spreadProps(__spreadValues({}, data), { pages: plugin2.pages })
           };
         }
         return data;
@@ -130,7 +138,7 @@ var plugin = {
     {
       hook: "allRequests",
       name: "addNotionPagesToAllRequests",
-      description: `Add collected Notion posts to allRequests array`,
+      description: `Add collected Notion pages to allRequests array`,
       priority: 50,
       run: async ({
         allRequests,
@@ -153,12 +161,12 @@ var plugin = {
         request,
         data
       }) => {
-        if (request.route === route && request.slug && data.posts && data.posts[request.slug]) {
-          const post = data.posts[request.slug];
+        if (request.route === mainRoute && request.slug && data.pages && data.pages[request.slug]) {
+          const page = data.pages[request.slug];
           return {
             data: __spreadProps(__spreadValues({}, data), {
-              post,
-              html: `<p>${JSON.stringify(post)}</p>`
+              page,
+              html: `<p>${JSON.stringify(page)}</p>`
             })
           };
         }
@@ -167,10 +175,11 @@ var plugin = {
     }
   ],
   config: {
-    routes: [route],
+    routes: [],
     notion: {
-      apiKey: process.env.NOTION_API_KEY || "",
-      databaseId: process.env.NOTION_DATABASE_ID || ""
+      apiKey: "",
+      databaseId: "",
+      databaseQueryParameters: {}
     }
   }
 };
